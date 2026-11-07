@@ -1,0 +1,14 @@
+# everything the scripts create (NEST GPU clone, build, install, NESTML staging)
+work/
+work_check/
+
+# files NESTML and the scripts leave next to generated code
+*.bak
+*.orig
+
+__pycache__/
+*.pyc
+
+# the Python environment of the README, and the figure the example draws
+.venv/
+edlif_edstdp_example.png

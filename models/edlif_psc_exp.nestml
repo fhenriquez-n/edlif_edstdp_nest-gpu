@@ -1,0 +1,134 @@
+# edlif - Simple current based energy-dependent leaky integrate and fire
+# (NESTML 9 syntax: indentation-based blocks, no "end" keywords)
+
+model edlif_psc_exp:
+
+    state: # Same but adds 
+        r integer = 0                    # counts number of ticks during the refractory period
+        V_abs mV = 0 mV
+        ATP real = 100                   # Available ATP percent
+        E_ap_tr real = 0.                # Action potential consumption trace
+        homeostatic_s_enabled real = 1.  # Doesn't allow negative ATP production
+        alp real = 0                     # alpha for V_reset
+        bet real = 0                     # beta for V_reset
+
+        # In this version currents and ATP consumption are declared as variables in state, then their behaviour in equations
+
+        # synaptic currents (replace the former convolve() kernels)
+        I_syn_exc pA = 0 pA
+        I_syn_inh pA = 0 pA
+
+        # synaptic ATP-consumption traces (replace the former ATP kernels)
+        ATP_syn_ex real = 0
+        ATP_syn_in real = 0
+
+    equations:
+        # currents
+        inline I_syn pA = I_syn_exc - I_syn_inh
+
+        # voltages
+        recordable inline V_m mV = V_abs + E_L              # Membrane potential (Same)
+
+        # ATP consumption
+        recordable inline E_syn_c real = (ATP_syn_ex * E_syn_ex / tau_syn_atp_ex / w_max + ATP_syn_in * E_syn_in / tau_syn_atp_in / w_min) / o_t
+        recordable inline E_ap_c real = E_ap_tr * E_ap / tau_ap / o_t  # reescale to obtain E_ap consumption
+        recordable inline ATP_c real = (ATP_basal + E_ap_c + E_syn_c)
+
+        # ATP supply
+        recordable inline ATP_s real = (ATP_h - ATP) * K_ATP * homeostatic_s_enabled + ATP_basal
+
+        # ODEs
+        I_syn_exc' = -I_syn_exc / tau_syn_ex
+        I_syn_inh' = -I_syn_inh / tau_syn_in
+        ATP_syn_ex' = -ATP_syn_ex / tau_syn_atp_ex
+        ATP_syn_in' = -ATP_syn_in / tau_syn_atp_in
+        E_ap_tr' = -E_ap_tr / tau_ap
+        V_abs' = -V_abs / tau_m + (I_syn + I_e + I_stim) / C_m
+        ATP' = (ATP_s - ATP_c) * o_t * (1 - fix_atp)
+
+    parameters:
+        C_m     pF = 250 pF         # Capacitance of the membrane
+        tau_m   ms = 20 ms          # Membrane time constant
+        tau_syn_in ms = 6 ms        # Time constant of synaptic current
+        tau_syn_ex ms = 6 ms        # Time constant of synaptic current
+        t_ref   ms = 8 ms           # Duration of refractory period
+        E_L     mV = -70 mV         # Resting potential
+        V_reset mV = -70 mV - E_L   # Reset potential of the membrane
+        V_th    mV = -50 mV - E_L   # Spike threshold
+
+        # constant external input current
+        I_e pA = 0 pA
+
+        # unitary postsynaptic current amplitude
+        unit_psc pA = 1 pA
+
+        # ATP-related parameters
+        K_ATP real = 1                  # ATP production parameter.
+        o_t ms**-1 = 1 ms**-1           # to convert to 1/ms units
+        tau_ap ms = 60 ms               # action-potential energy-consumption time constant
+        tau_syn_atp_in ms = 60 ms       # Time constant of synaptic consumption
+        tau_syn_atp_ex ms = 60 ms       # Time constant of synaptic consumption
+        ATP_h real = 100                # homeostatic ATP level in percent
+        E_rp real = 5                   # resting-potential consumption percent/ms
+        E_hk real = 5                   # housekeeping consuption percent/ms
+        E_ap real = 4.1                 # action potential consumption percent/spike
+        E_syn_ex real = 0.5             # exc consumption percent/spike
+        E_syn_in real = 0.5             # inh synapsis consumption percent/spike
+        ATP_basal real = E_rp + E_hk    # basal ATP production percent/ms
+        gamma real = 16                 # sensitivity to energy imbalance
+        w_max real = 1000
+        w_min real = 1000
+        fix_atp real = 0                # if 1 => atp is fixed, if 0 => dynamic atp
+
+    internals:
+        RefractoryCounts integer = steps(t_ref)    # refractory time in steps
+        alpha_ real = V_reset / V_th - 1           # alpha for ATP-dependent V_reset (was alpha())
+
+    input:
+        exc_spikes <- excitatory spike
+        inh_spikes <- inhibitory spike
+        I_stim pA <- continuous
+
+    output:
+        spike
+
+    update:
+        integrate_odes()
+
+        if r > 0:
+            # neuron is absolute refractory
+            r = r - 1
+            # clamp voltage to the ATP-dependent reset value
+            bet = 1 + alpha_ * (2 - (2 / (1 + exp(-(ATP_h - ATP) / ATP_h * gamma))))
+            V_abs = bet * V_th
+
+        if ATP > ATP_h:
+            # disable homeostatic production if ATP > ATP_h
+            homeostatic_s_enabled = 0
+        else:
+            homeostatic_s_enabled = 1
+
+        if ATP <= 0:
+            ATP = 0
+
+    onReceive(exc_spikes):
+        I_syn_exc += unit_psc * exc_spikes * 1 s
+        ATP_syn_ex += exc_spikes * 1 s
+
+    onReceive(inh_spikes):
+        I_syn_inh += unit_psc * inh_spikes * 1 s
+        ATP_syn_in += inh_spikes * 1 s
+
+    onCondition(V_abs >= V_th):
+        # threshold crossing
+        r = RefractoryCounts
+
+        # ATP-dependent reset potential
+        alp = alpha_
+        bet = 1 + alpha_ * (2 - (2 / (1 + exp(-(ATP_h - ATP) / ATP_h * gamma))))
+        V_abs = bet * V_th
+
+        # AP energy trace
+        E_ap_tr += 1
+
+        emit_spike()

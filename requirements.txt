@@ -1,0 +1,7 @@
+
+# for generate_gpu.py
+nestml==9.0.0
+
+# General
+numpy
+matplotlib
