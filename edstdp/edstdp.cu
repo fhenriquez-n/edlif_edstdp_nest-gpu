@@ -7,7 +7,7 @@
  *  NEST GPU's stdp.cu and therefore distributed under the same licence.
  *
  *  Copyright (C) 2021 The NEST Initiative (NEST GPU, stdp.cu)
- *  ED-STDP additions: the authors of this package.
+ *  ED-STDP additions: the authors of this package. Modified from stdp.cu, November 2026.
  *
  *  NEST GPU is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
